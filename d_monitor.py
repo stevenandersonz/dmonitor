@@ -10,15 +10,52 @@ ort_session = onnxruntime.InferenceSession("dmonitoring_model.onnx",providers=['
 
 #UTILS to parse the output of the networ
 
+POSE_PITCH_THRESHOLD = 0.3133
+POSE_PITCH_THRESHOLD_SLACK = 0.3237
+POSE_YAW_THRESHOLD = 0.4020
+POSE_YAW_THRESHOLD_SLACK = 0.5042
+PITCH_NATURAL_OFFSET = 0.029 # initial value before offset is learned
+PITCH_NATURAL_THRESHOLD = 0.449
+YAW_NATURAL_OFFSET = 0.097 # initial value before offset is learned
+PITCH_MAX_OFFSET = 0.124
+PITCH_MIN_OFFSET = -0.0881
+YAW_MAX_OFFSET = 0.289
+YAW_MIN_OFFSET = -0.0246
+
 REG_SCALE = 0.25
+EFL = 598.0
+import math
+def get_face_orientation_lbl(pitch, yaw):
+    if abs(pitch) < POSE_PITCH_THRESHOLD and abs(yaw) < POSE_YAW_THRESHOLD:
+        return "Face is front-facing"
+    elif pitch > POSE_PITCH_THRESHOLD:
+        return "Face is facing upwards"
+    elif pitch < -POSE_PITCH_THRESHOLD:
+        return "Face is facing downwards"
+    elif yaw > POSE_YAW_THRESHOLD:
+        return "Face is facing right"
+    elif yaw < -POSE_YAW_THRESHOLD:
+        return "Face is facing left"
+    else:
+        return "Face orientation is not clear"
+def get_distracted_types(pitch, yaw):
+    distracted_types = []
+    pitch_error = pitch - PITCH_NATURAL_OFFSET
+    yaw_error = yaw - YAW_NATURAL_OFFSET
+    pitch_error = 0 if pitch_error > 0 else abs(pitch_error) # no positive pitch limit
+    yaw_error = abs(yaw_error)
+    if pitch_error > PITCH_NATURAL_THRESHOLD or yaw_error > POSE_YAW_THRESHOLD* 1: #self.pose.cfactor_yaw:
+        return "distracted"
+    else:
+        return "no distracted"
 def face_orientation_from_net(angles_desc, pos_desc, rpy_calib=[0.0,0.0,0.0], W=720, H=990):
     # the output of these angles are in device frame
     # so from driver's perspective, pitch is up and yaw is right
     pitch_net, yaw_net, roll_net = angles_desc
 
     face_pixel_position = ((pos_desc[0]+0.5)*W, (pos_desc[1]+0.5)*H)
-    yaw_focal_angle = atan2(face_pixel_position[0] - W//2, EFL)
-    pitch_focal_angle = atan2(face_pixel_position[1] - H//2, EFL)
+    yaw_focal_angle = math.atan2(face_pixel_position[0] - W//2, EFL)
+    pitch_focal_angle = math.atan2(face_pixel_position[1] - H//2, EFL)
 
     pitch = pitch_net + pitch_focal_angle
     yaw = -yaw_net + yaw_focal_angle
@@ -57,14 +94,14 @@ def parse_driver_data(d_state, s, out_idx_offset):
         d_state.face_position[i] = s[out_idx_offset + 3 + i] * REG_SCALE
         d_state.face_position_std[i] = np.exp(s[out_idx_offset + 9 + i])
 
-    #face size?
-    d_state.face_size = s[out_idx_offset+11] 
-
     for i in range(4):
         d_state.ready_prob[i] = sigmoid(s[out_idx_offset + 35 + i])
         
     for i in range(2):
         d_state.not_ready_prob[i] = sigmoid(s[out_idx_offset + 39 + i])
+
+    #NOTE: This might no be right
+    d_state.face_size = sigmoid(s[out_idx_offset + 11])
 
     d_state.face_prob = sigmoid(s[out_idx_offset + 12])
     d_state.left_eye_prob = sigmoid(s[out_idx_offset + 21])
@@ -77,9 +114,6 @@ def parse_driver_data(d_state, s, out_idx_offset):
 #MODEL can detect two passengers.
 driver_state_r = DriverStateResult()
 driver_state_l = DriverStateResult()
-
-
-
 
 # DETECT DRIVER 
 cap = cv2.VideoCapture(1)
@@ -115,14 +149,17 @@ while True:
     # detecting the position of the face in the frame
     H, W, _ = frame.shape
     face_x, face_y = ((driver_state_r.face_position[0]+0.5)*W, (driver_state_r.face_position[1]+0.5)*H)
-    print(face_x)
-    print(face_y)
+    roll, pitch, yaw = face_orientation_from_net(driver_state_r.face_orientation, driver_state_r.face_position)
+    distracted_lbl = get_distracted_types(pitch,yaw)
+    face_orientation_lbl = get_face_orientation_lbl(pitch,yaw)
+    
     cv2.circle(frame, (int(face_x), int(face_y)), 5, (0, 255, 0), -1)
     # # I think this goes as:
     cv2.putText(frame, f'{label}', (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.putText(frame, f'{label2}', (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.putText(frame, f'{label3}', (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
-    cv2.putText(frame, f'sunglases: {driver_state_r.sunglasses_prob:.2f}', (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+    cv2.putText(frame, f'{face_orientation_lbl}', (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+    cv2.putText(frame, f'{distracted_lbl}', (10, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.imshow('Output', frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
