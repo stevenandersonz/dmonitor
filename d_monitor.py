@@ -21,11 +21,15 @@ PITCH_MAX_OFFSET = 0.124
 PITCH_MIN_OFFSET = -0.0881
 YAW_MAX_OFFSET = 0.289
 YAW_MIN_OFFSET = -0.0246
+BLINK_THRESHOLD = 0.7#0.895
+FACE_THRESHOLD = 0.7
+EYE_THRESHOLD = 0.65
 
 REG_SCALE = 0.25
 EFL = 598.0
 import math
 def get_face_orientation_lbl(pitch, yaw):
+    # tested on macair webcam it still need to fix left side 
     lbls = []
     if abs(pitch) < POSE_PITCH_THRESHOLD and abs(yaw) < POSE_YAW_THRESHOLD:
         lbls.append('front') 
@@ -118,7 +122,9 @@ driver_state_l = DriverStateResult()
 
 # DETECT DRIVER 
 cap = cv2.VideoCapture(1)
-
+rblink = 0
+lblink = 0
+blink = 0
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -141,7 +147,6 @@ while True:
     #NOTE: Model output for two person in the car
     parse_driver_data(driver_state_r, ort_outs[0].squeeze(), 0)
     parse_driver_data(driver_state_l, ort_outs[0].squeeze(), 41)
-    print(driver_state_r.face_size)
     label = f"Face {'Detected' if driver_state_r.face_prob >= 0.5 else 'Missing'} - {driver_state_r.face_prob:.2f}"
     # TODO: doesn't work i'm gessing due to image calibration or how i'm sitting
     label2 = f"Face Position y: {driver_state_r.face_position[0]} x:{driver_state_r.face_position[1]}"
@@ -151,6 +156,13 @@ while True:
     H, W, _ = frame.shape
     face_x, face_y = ((driver_state_r.face_position[0]+0.5)*W, (driver_state_r.face_position[1]+0.5)*H)
     roll, pitch, yaw = face_orientation_from_net(driver_state_r.face_orientation, driver_state_r.face_position, W=W, H=H)
+    print(driver_state_r.right_blink_prob)
+    lblink = driver_state_r.left_blink_prob * (driver_state_r.left_blink_prob > EYE_THRESHOLD) 
+    rblink = driver_state_r.right_blink_prob * (driver_state_r.right_blink_prob > EYE_THRESHOLD) 
+
+    # rblink += 0 if driver_state_r.right_blink_prob > BLINK_THRESHOLD//2 else 1
+    # lblink += 0 if driver_state_r.left_blink_prob >  BLINK_THRESHOLD//2 else 1
+    blink += 1 if (lblink + rblink)*0.5 > BLINK_THRESHOLD else 0 
     distracted_lbl = get_distracted_types(pitch,yaw)
     face_orientation_lbl = ",".join(get_face_orientation_lbl(pitch,yaw))
     
@@ -161,6 +173,7 @@ while True:
     cv2.putText(frame, f'{label3}', (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.putText(frame, f'Face is facing: {face_orientation_lbl}', (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.putText(frame, f'{distracted_lbl}', (10, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+    cv2.putText(frame, f'Blinks b:{blink} R: {rblink} L: {lblink}', (10, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.imshow('Output', frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
