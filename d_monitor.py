@@ -26,18 +26,19 @@ REG_SCALE = 0.25
 EFL = 598.0
 import math
 def get_face_orientation_lbl(pitch, yaw):
+    lbls = []
     if abs(pitch) < POSE_PITCH_THRESHOLD and abs(yaw) < POSE_YAW_THRESHOLD:
-        return "Face is front-facing"
-    elif pitch > POSE_PITCH_THRESHOLD:
-        return "Face is facing upwards"
-    elif pitch < -POSE_PITCH_THRESHOLD:
-        return "Face is facing downwards"
-    elif yaw > POSE_YAW_THRESHOLD:
-        return "Face is facing right"
-    elif yaw < -POSE_YAW_THRESHOLD:
-        return "Face is facing left"
-    else:
-        return "Face orientation is not clear"
+        lbls.append('front') 
+    if pitch > POSE_PITCH_THRESHOLD:
+        lbls.append('up') 
+    if pitch < 0:
+        lbls.append('down') 
+    if yaw > POSE_YAW_THRESHOLD:
+        lbls.append('right') 
+    if yaw < 0:
+        lbls.append("left")
+    return lbls
+
 def get_distracted_types(pitch, yaw):
     distracted_types = []
     pitch_error = pitch - PITCH_NATURAL_OFFSET
@@ -149,16 +150,16 @@ while True:
     # detecting the position of the face in the frame
     H, W, _ = frame.shape
     face_x, face_y = ((driver_state_r.face_position[0]+0.5)*W, (driver_state_r.face_position[1]+0.5)*H)
-    roll, pitch, yaw = face_orientation_from_net(driver_state_r.face_orientation, driver_state_r.face_position)
+    roll, pitch, yaw = face_orientation_from_net(driver_state_r.face_orientation, driver_state_r.face_position, W=W, H=H)
     distracted_lbl = get_distracted_types(pitch,yaw)
-    face_orientation_lbl = get_face_orientation_lbl(pitch,yaw)
+    face_orientation_lbl = ",".join(get_face_orientation_lbl(pitch,yaw))
     
     cv2.circle(frame, (int(face_x), int(face_y)), 5, (0, 255, 0), -1)
     # # I think this goes as:
     cv2.putText(frame, f'{label}', (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.putText(frame, f'{label2}', (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.putText(frame, f'{label3}', (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
-    cv2.putText(frame, f'{face_orientation_lbl}', (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+    cv2.putText(frame, f'Face is facing: {face_orientation_lbl}', (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.putText(frame, f'{distracted_lbl}', (10, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.imshow('Output', frame)
 
